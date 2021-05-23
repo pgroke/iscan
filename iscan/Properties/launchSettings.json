@@ -1,0 +1,7 @@
+{
+  "profiles": {
+    "iscan": {
+      "commandName": "WSL2"
+    }
+  }
+}
