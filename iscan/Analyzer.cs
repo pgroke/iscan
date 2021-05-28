@@ -3,25 +3,30 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
+using System.IO;
+using System.Threading;
 
 namespace iscan
 {
 	class Analyzer
 	{
-		public void TestRun()
+		public static FileEntry AnalyzeCompileCommand(string compileCommand)
 		{
-			AnalyzeCompileCommand("gcc test/test.cpp");
+			var analyzer = new Analyzer();
+			analyzer.Run(compileCommand);
+			return analyzer.m_mainFile;
 		}
 
-		public void AnalyzeCompileCommand(string compileCommand)
+		private void Run(string compileCommand)
 		{
 			for (int i = 0; i < 1; i++)
 			{
-				Reset();
-				(var stdout, var stderr) = Utility.ExecuteCommand(compileCommand + " -E -Wp,-v");
+				(var stdout, var stderr) = Utility.ExecuteCommand(StripCommand(compileCommand) + " -E -Wp,-v");
 				ProcessOutput(stdout);
 			}
 
+#if MEH
 			Console.WriteLine("");
 			Console.WriteLine("");
 			Console.WriteLine("TOKENS:");
@@ -47,7 +52,7 @@ namespace iscan
 			}
 			Console.WriteLine("");
 			Console.WriteLine("    " + total.ToString().PadRight(10) + "TOTAL");
-
+#endif
 
 #if MEH
 			Console.WriteLine("");
@@ -55,6 +60,35 @@ namespace iscan
 			foreach (var s in stderr)
 				Console.WriteLine(s);
 #endif
+		}
+
+		private string StripCommand(string command)
+		{
+			var parts = CommandLine.Split(command);
+			var sb = new StringBuilder();
+			sb.Append(parts[0]);
+
+			bool skipNext = false;
+			foreach (var p in parts.Skip(1))
+			{
+				if (skipNext)
+				{
+					skipNext = false;
+					continue;
+				}
+				if (p == "-o" || p == "\"-o\"")
+				{
+					skipNext = true;
+					continue;
+				}
+				if (p == "-c" || p == "\"-c\"")
+					continue;
+
+				sb.Append(" ");
+				sb.Append(p);
+			}
+
+			return sb.ToString();
 		}
 
 		private void ProcessOutput(List<string> ppout)
@@ -126,31 +160,6 @@ namespace iscan
 			LeaveFile(true);
 		}
 
-		private string m_currentLine = null;
-		private FileEntry m_mainFile = null;
-		private bool m_startBuiltInWorkaroundDone = false;
-		private bool m_startCommandLineWorkaroundDone = false;
-		private bool m_returnToMainWorkaroundDone = false;
-
-		private List<FileEntry> m_includeStack = new List<FileEntry>();
-		private List<string> m_currentContents = new List<string>();
-
-		private Dictionary<string, FileEntry> m_files = new Dictionary<string, FileEntry>();
-
-		private void Reset()
-		{
-			m_mainFile = null;
-			m_currentLine = null;
-			m_startBuiltInWorkaroundDone = false;
-			m_startCommandLineWorkaroundDone = false;
-			m_returnToMainWorkaroundDone = false;
-
-			m_includeStack.Clear();
-			m_currentContents.Clear();
-
-			m_files.Clear();
-		}
-
 		private void ProcessLineInfoLine(LineInfo lineInfo)
 		{
 			if (lineInfo.fileStart && lineInfo.fileReturn)
@@ -188,7 +197,7 @@ namespace iscan
 
 			if (lineInfo.fileStart)
 			{
-				StartFile(fileEntry);
+				EnterFile(fileEntry);
 			}
 			else if (lineInfo.fileReturn)
 			{
@@ -196,13 +205,24 @@ namespace iscan
 			}
 
 			if (fileEntry != CurrentFile())
-				throw new Exception("Meh: " + m_currentLine);
+			{
+				// Workaround: output sometimes contains just a directory name before the "<built-in>" line - ignore
+				if (!m_startBuiltInWorkaroundDone && !lineInfo.HasAnyFlag())
+				{
+					// ingore
+				}
+				else
+					throw new Exception("Meh: " + m_currentLine);
+			}
 		}
 
-		private void StartFile(FileEntry fileEntry)
+		private void EnterFile(FileEntry fileEntry)
 		{
 			if (m_includeStack.Count > 0)
+			{
 				CountContents();
+				CurrentFile().AddInclude(fileEntry);
+			}
 
 			m_includeStack.Add(fileEntry);
 			//PrintStack();
@@ -240,19 +260,6 @@ namespace iscan
 			m_currentContents.Clear();
 		}
 
-		private StringBuilder m_printStackStringBuilder = new StringBuilder();
-		private void PrintStack()
-		{
-			m_printStackStringBuilder.Length = 0;
-			foreach (var entry in m_includeStack)
-			{
-				if (m_printStackStringBuilder.Length != 0)
-					m_printStackStringBuilder.Append(" >> ");
-				m_printStackStringBuilder.Append(entry.Path);
-			}
-			Console.WriteLine(m_printStackStringBuilder.ToString());
-		}
-
 		private FileEntry GetFileEntry(string path, bool isMainFile)
 		{
 			var fileEntry = m_files.GetValueOrDefault(path, null);
@@ -274,10 +281,16 @@ namespace iscan
 			return m_includeStack[m_includeStack.Count - 1];
 		}
 
-		private Dictionary<string, bool> m_ignoredPaths = new Dictionary<string, bool> {
-			{ "<command-line>", true },
-			{ "<built-in>", true },
-		};
+		private string m_currentLine = null;
+		private FileEntry m_mainFile = null;
+		private bool m_startBuiltInWorkaroundDone = false;
+		private bool m_startCommandLineWorkaroundDone = false;
+		private bool m_returnToMainWorkaroundDone = false;
+
+		private List<FileEntry> m_includeStack = new List<FileEntry>();
+		private List<string> m_currentContents = new List<string>();
+
+		private Dictionary<string, FileEntry> m_files = new Dictionary<string, FileEntry>();
 	}
 
 	class FileEntry
@@ -286,11 +299,18 @@ namespace iscan
 		{
 			Path = path;
 			IsTranslationUnit = isTU;
+			Includes = new Dictionary<FileEntry, bool>();
+		}
+
+		public void AddInclude(FileEntry include)
+		{
+			if (!Includes.ContainsKey(include))
+				Includes.Add(include, true);
 		}
 
 		public readonly string Path;
 		public readonly bool IsTranslationUnit;
-		public List<FileEntry> Includes;
+		public readonly Dictionary<FileEntry, bool> Includes;
 		public int SelfTokenCount = 0;
 		public int SelfLineCount = 0;
 	}
@@ -303,5 +323,71 @@ namespace iscan
 		public bool fileReturn;
 		public bool systemHeader;
 		public bool externCBlock;
+
+		public bool HasAnyFlag()
+		{
+			return fileStart || fileReturn || systemHeader || externCBlock;
+		}
+	}
+
+	class ParallelAnalyzer
+	{
+		public static void ProcessCompileCommandsJson(string compileCommandsJson)
+		{
+			var pa = new ParallelAnalyzer();
+			pa.Run(compileCommandsJson);
+		}
+
+		private void Run(string compileCommandsJson)
+		{
+			var json = File.ReadAllText(compileCommandsJson);
+			var compileCommands = JsonSerializer.Deserialize<CompileCommandsJson>("{ \"entries\": " + json + " }");
+
+			foreach (var entry in compileCommands.entries)
+			{
+				m_jobList.AddLast(entry);
+				if (m_jobList.Count >= 100)
+					break;
+			}
+			m_totalJobCount = m_jobList.Count;
+
+			var threads = new List<Thread>();
+			for (int i = 0; i < 24; i++)
+				threads.Add(new Thread(ThreadFunction));
+			foreach (var t in threads)
+				t.Start();
+			foreach (var t in threads)
+				t.Join();
+		}
+
+		private void ThreadFunction()
+		{
+			while (true)
+			{
+				int fileNum;
+				CompileCommandsJsonEntry file;
+
+				lock (m_jobListMutex)
+				{
+					if (m_jobList.Count == 0)
+						break;
+					file = m_jobList.First.Value;
+					m_jobList.RemoveFirst();
+					fileNum = m_totalJobCount - m_jobList.Count;
+				}
+
+				if (File.Exists(file.file))
+				{
+					Console.WriteLine("{0}/{1} '{2}'...", fileNum, m_totalJobCount, file.file);
+					Analyzer.AnalyzeCompileCommand(file.command);
+				}
+				else
+					Console.WriteLine("Skipping non-existant file '" + file.file + "'.");
+			}
+		}
+
+		private readonly object m_jobListMutex = new object();
+		private readonly LinkedList<CompileCommandsJsonEntry> m_jobList = new LinkedList<CompileCommandsJsonEntry>();
+		private int m_totalJobCount;
 	}
 }

@@ -11,8 +11,13 @@ namespace iscan
 		{
 			try
 			{
-				var a = new Analyzer();
-				a.TestRun();
+				ParallelAnalyzer.ProcessCompileCommandsJson("/code/foo/compile_commands.json");
+#if MEH
+				if (args.Length > 0)
+					a.Run(args[0]);
+				else
+					a.TestRun();
+#endif
 				return 0;
 			}
 			catch (Exception ex)

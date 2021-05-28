@@ -15,7 +15,6 @@ namespace iscan
 			{
 				proc.StartInfo.FileName = "/bin/bash";
 				proc.StartInfo.Arguments = "-c " + BashEscape(commandLine);
-				Console.WriteLine(proc.StartInfo.Arguments);
 				proc.StartInfo.RedirectStandardInput = true;
 				proc.StartInfo.RedirectStandardOutput = true;
 				proc.StartInfo.RedirectStandardError = true;
