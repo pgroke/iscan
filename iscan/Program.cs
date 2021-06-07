@@ -9,9 +9,20 @@ namespace iscan
 	{
 		static int Main(string[] args)
 		{
+			var sw = Stopwatch.StartNew();
 			try
 			{
-				ParallelAnalyzer.ProcessCompileCommandsJson("/code/foo/compile_commands.json");
+				if (args.Length >= 2)
+				{
+					ParallelAnalyzer.ProcessCompileCommandsJson(args[0], args[1]);
+				}
+				else
+				{
+					ParallelAnalyzer.ProcessCompileCommandsJson(
+						"./compile_commands.json",
+						"./_iscan_out.txt");
+				}
+				Log.Info("Total time: " + sw.Elapsed.TotalSeconds + " seconds");
 #if MEH
 				if (args.Length > 0)
 					a.Run(args[0]);
@@ -23,6 +34,7 @@ namespace iscan
 			catch (Exception ex)
 			{
 				Log.Error("Error: " + ex.ToString());
+				Log.Info("Total time: " + sw.Elapsed.TotalSeconds + " seconds");
 				return 1;
 			}
 		}

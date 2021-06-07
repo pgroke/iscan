@@ -11,60 +11,37 @@ namespace iscan
 {
 	class Analyzer
 	{
-		public static FileEntry AnalyzeCompileCommand(string compileCommand)
+		public static FileEntry AnalyzeCompileCommand(string compileCommand, SynchronizedStringMap stringMap)
 		{
-			var analyzer = new Analyzer();
-			analyzer.Run(compileCommand);
+			var analyzer = new Analyzer(stringMap);
+			if (!analyzer.Run(compileCommand))
+				return null;
 			return analyzer.m_mainFile;
 		}
 
-		private void Run(string compileCommand)
+		private Analyzer(SynchronizedStringMap stringMap)
 		{
-			for (int i = 0; i < 1; i++)
-			{
-				(var stdout, var stderr) = Utility.ExecuteCommand(StripCommand(compileCommand) + " -E -Wp,-v");
-				ProcessOutput(stdout);
-			}
+			m_stringMap = stringMap;
+		}
 
-#if MEH
-			Console.WriteLine("");
-			Console.WriteLine("");
-			Console.WriteLine("TOKENS:");
-			int total = 0;
-			var filesSorted = m_files.OrderBy(e => -e.Value.SelfTokenCount);
-			foreach (var entry in filesSorted)
-			{
-				Console.WriteLine("    " + entry.Value.SelfTokenCount.ToString().PadRight(10) + entry.Key);
-				total += entry.Value.SelfTokenCount;
-			}
-			Console.WriteLine("");
-			Console.WriteLine("    " + total.ToString().PadRight(10) + "TOTAL");
+		private bool Run(string compileCommand)
+		{
+			var strippedCommand = StripCommand(compileCommand);
+			if (strippedCommand == null)
+				return false;
 
-			Console.WriteLine("");
-			Console.WriteLine("");
-			Console.WriteLine("LINES:");
-			total = 0;
-			filesSorted = m_files.OrderBy(e => -e.Value.SelfLineCount);
-			foreach (var entry in filesSorted)
-			{
-				Console.WriteLine("    " + entry.Value.SelfLineCount.ToString().PadRight(10) + entry.Key);
-				total += entry.Value.SelfLineCount;
-			}
-			Console.WriteLine("");
-			Console.WriteLine("    " + total.ToString().PadRight(10) + "TOTAL");
-#endif
-
-#if MEH
-			Console.WriteLine("");
-			Console.WriteLine("** stderr **");
-			foreach (var s in stderr)
-				Console.WriteLine(s);
-#endif
+			(var stdout, var stderr) = Utility.ExecuteCommand(strippedCommand + " -E -Wp,-v");
+			ProcessOutput(stdout);
+			return true;
 		}
 
 		private string StripCommand(string command)
 		{
 			var parts = CommandLine.Split(command);
+
+			if (!parts[0].EndsWith("/gcc") && !parts[0].EndsWith("/g++"))
+				return null;
+
 			var sb = new StringBuilder();
 			sb.Append(parts[0]);
 
@@ -265,10 +242,16 @@ namespace iscan
 			var fileEntry = m_files.GetValueOrDefault(path, null);
 			if (fileEntry == null)
 			{
-				fileEntry = new FileEntry(path, isMainFile);
-				m_files.Add(path, fileEntry);
+				var internedPath = Intern(path);
+				fileEntry = new FileEntry(internedPath, isMainFile);
+				m_files.Add(internedPath, fileEntry);
 			}
 			return fileEntry;
+		}
+
+		private string Intern(string str)
+		{
+			return m_stringMap.Intern(str);
 		}
 
 		private void ProcessContentLine(string line)
@@ -280,6 +263,8 @@ namespace iscan
 		{
 			return m_includeStack[m_includeStack.Count - 1];
 		}
+
+		private readonly SynchronizedStringMap m_stringMap;
 
 		private string m_currentLine = null;
 		private FileEntry m_mainFile = null;
@@ -332,13 +317,13 @@ namespace iscan
 
 	class ParallelAnalyzer
 	{
-		public static void ProcessCompileCommandsJson(string compileCommandsJson)
+		public static void ProcessCompileCommandsJson(string compileCommandsJson, string outputPath)
 		{
 			var pa = new ParallelAnalyzer();
-			pa.Run(compileCommandsJson);
+			pa.Run(compileCommandsJson, outputPath);
 		}
 
-		private void Run(string compileCommandsJson)
+		private void Run(string compileCommandsJson, string outputPath)
 		{
 			var json = File.ReadAllText(compileCommandsJson);
 			var compileCommands = JsonSerializer.Deserialize<CompileCommandsJson>("{ \"entries\": " + json + " }");
@@ -346,18 +331,28 @@ namespace iscan
 			foreach (var entry in compileCommands.entries)
 			{
 				m_jobList.AddLast(entry);
-				if (m_jobList.Count >= 100)
-					break;
+				//if (m_jobList.Count >= 100)
+				//	break;
 			}
 			m_totalJobCount = m_jobList.Count;
 
 			var threads = new List<Thread>();
 			for (int i = 0; i < 24; i++)
-				threads.Add(new Thread(ThreadFunction));
+				threads.Add(new Thread(() => ThreadFunction()));
 			foreach (var t in threads)
 				t.Start();
 			foreach (var t in threads)
 				t.Join();
+
+			m_dataModel.paths = m_pathMap.GetStrings();
+
+			using (var outputStream = File.Create(outputPath))
+			using (var outputWriter = new Utf8JsonWriter(outputStream, new JsonWriterOptions{ Indented = true, SkipValidation = true }))
+			{
+				JsonSerializer.Serialize(outputWriter, m_dataModel, new JsonSerializerOptions{ WriteIndented = true });
+				outputWriter.Flush();
+				outputStream.Flush();
+			}
 		}
 
 		private void ThreadFunction()
@@ -376,18 +371,79 @@ namespace iscan
 					fileNum = m_totalJobCount - m_jobList.Count;
 				}
 
-				if (File.Exists(file.file))
+				if (!File.Exists(file.file))
 				{
-					Console.WriteLine("{0}/{1} '{2}'...", fileNum, m_totalJobCount, file.file);
-					Analyzer.AnalyzeCompileCommand(file.command);
+					Log.Info("Skipping non-existant file '" + file.file + "'.");
+					continue;
 				}
-				else
-					Console.WriteLine("Skipping non-existant file '" + file.file + "'.");
+
+				var tuResult = Analyzer.AnalyzeCompileCommand(file.command, m_stringMap);
+				if (tuResult == null)
+				{
+					Log.Info("Skipping unsupported compile command for file '" + file.file + "'.");
+					continue;
+				}
+
+				Console.WriteLine("{0}/{1} '{2}'...", fileNum, m_totalJobCount, file.file);
+
+				var dmTu = ToDataModel(tuResult);
+				lock (m_dataModelLock)
+					m_dataModel.tus.Add(dmTu);
 			}
+		}
+
+		private DMTranslationUnit ToDataModel(FileEntry translationUnit)
+		{
+			Dictionary<FileEntry, bool> seen = new Dictionary<FileEntry, bool>();
+			LinkedList<FileEntry> toProcess = new LinkedList<FileEntry>();
+
+			DMTranslationUnit dmTu = new DMTranslationUnit();
+			dmTu.path = MapPath(translationUnit.Path);
+
+			toProcess.AddLast(translationUnit);
+			seen[translationUnit] = true;
+
+			while (toProcess.Count > 0)
+			{
+				var entry = toProcess.First.Value;
+				toProcess.RemoveFirst();
+
+				var dmFile = new DMFile();
+				dmFile.path = MapPath(entry.Path);
+				dmFile.sln = entry.SelfLineCount;
+				dmFile.stk = entry.SelfTokenCount;
+
+				foreach (var includeNode in entry.Includes)
+				{
+					var include = includeNode.Key;
+					if (!seen.ContainsKey(include))
+					{
+						toProcess.AddLast(include);
+						seen[include] = true;
+					}
+
+					dmFile.inc.Add(MapPath(include.Path));
+				}
+
+				dmTu.files.Add(dmFile);
+			}
+
+			return dmTu;
+		}
+
+		private int MapPath(string path)
+		{
+			return m_pathMap.Add(path);
 		}
 
 		private readonly object m_jobListMutex = new object();
 		private readonly LinkedList<CompileCommandsJsonEntry> m_jobList = new LinkedList<CompileCommandsJsonEntry>();
 		private int m_totalJobCount;
+
+		private readonly SynchronizedStringMap m_stringMap = new SynchronizedStringMap();
+		private readonly SynchronizedStringMap m_pathMap = new SynchronizedStringMap();
+
+		private readonly object m_dataModelLock = new object();
+		private DMProject m_dataModel = new DMProject();
 	}
 }
