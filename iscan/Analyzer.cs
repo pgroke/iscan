@@ -114,7 +114,7 @@ namespace iscan
 				}
 
 				var lineInfo = new LineInfo();
-				lineInfo.path = line[(pathStart + 1)..(pathEnd - 1)];
+				lineInfo.path = line[(pathStart + 1)..pathEnd];
 
 				var flags0 = line[(pathEnd + 1)..];
 				var flags1 = flags0.Split(" ", StringSplitOptions.RemoveEmptyEntries);
