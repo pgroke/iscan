@@ -9,10 +9,4 @@
     <ProjectReference Include="..\iscan.dm\iscan.dm.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <None Update="test\test.cpp">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
-
 </Project>

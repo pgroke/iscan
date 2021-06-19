@@ -7,10 +7,8 @@ namespace iscan
 {
 	static class Utility
 	{
-		public static (List<string> stdout, List<string> stderr) ExecuteCommand(string commandLine)
+		public static int ExecuteCommand(string commandLine, Action<string> stdoutSink, Action<string> stderrSink)
 		{
-			var stdout = new List<string>();
-			var stderr = new List<string>();
 			using (var proc = new Process())
 			{
 				proc.StartInfo.FileName = "/bin/bash";
@@ -18,8 +16,8 @@ namespace iscan
 				proc.StartInfo.RedirectStandardInput = true;
 				proc.StartInfo.RedirectStandardOutput = true;
 				proc.StartInfo.RedirectStandardError = true;
-				proc.OutputDataReceived += (object sender, DataReceivedEventArgs e) => { if (e.Data != null) stdout.Add(e.Data); };
-				proc.ErrorDataReceived += (object sender, DataReceivedEventArgs e) => { if (e.Data != null) stderr.Add(e.Data); };
+				proc.OutputDataReceived += (object sender, DataReceivedEventArgs e) => { if (e.Data != null) stdoutSink(e.Data); };
+				proc.ErrorDataReceived += (object sender, DataReceivedEventArgs e) => { if (e.Data != null) stderrSink(e.Data); };
 
 				if (!proc.Start())
 					throw new Exception("Failed to start process: " + commandLine);
@@ -29,15 +27,8 @@ namespace iscan
 				proc.BeginErrorReadLine();
 
 				proc.WaitForExit();
-				if (proc.ExitCode != 0)
-				{
-					foreach (var s in stderr)
-						Log.Info("stderr: " + s);
-					throw new Exception("Command failed with exit code " + proc.ExitCode + ": " + commandLine);
-				}
+				return proc.ExitCode;
 			}
-
-			return (stdout, stderr);
 		}
 
 		private static string BashEscape(string str)

@@ -1,3 +1,7 @@
 /.vs
 /iscan/bin
 /iscan/obj
+/iscan.dm/bin
+/iscan.dm/obj
+/iscan.analyze/bin
+/iscan.analyze/obj

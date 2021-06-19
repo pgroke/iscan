@@ -6,9 +6,9 @@ namespace iscan
 {
 	class StringMap
 	{
-		public List<string> GetStrings()
+		public string[] GetStrings()
 		{
-			return new List<string>(m_strings);
+			return m_strings.ToArray();
 		}
 
 		public string Map(int id)
@@ -43,7 +43,7 @@ namespace iscan
 
 	class SynchronizedStringMap
 	{
-		public List<string> GetStrings()
+		public string[] GetStrings()
 		{
 			lock (m_stringMapLock)
 				return m_stringMap.GetStrings();

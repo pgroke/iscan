@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.IO;
 using System.Threading;
+using iscan.dm;
 
 namespace iscan
 {
@@ -29,9 +30,29 @@ namespace iscan
 			var strippedCommand = StripCommand(compileCommand);
 			if (strippedCommand == null)
 				return false;
+			var commandLine = strippedCommand + " -E -Wp,-v";
 
-			(var stdout, var stderr) = Utility.ExecuteCommand(strippedCommand + " -E -Wp,-v");
-			ProcessOutput(stdout);
+			var stderr = new List<string>();
+
+			int exitCode = Utility.ExecuteCommand(commandLine,
+				(line) => ProcessOutputLine(line),
+				(line) => stderr.Add(line));
+
+			if (exitCode != 0)
+			{
+				foreach (var s in stderr)
+					Log.Info("stderr: " + s);
+				throw new Exception("Command failed with exit code " + exitCode + ": " + commandLine);
+			}
+
+			m_currentLine = null;
+
+			if (m_includeStack.Count != 1)
+				throw new Exception("Missing return from include: EOF.");
+			Debug.Assert(m_includeStack[0] == m_mainFile);
+
+			LeaveFile(true);
+
 			return true;
 		}
 
@@ -68,73 +89,62 @@ namespace iscan
 			return sb.ToString();
 		}
 
-		private void ProcessOutput(List<string> ppout)
+		private void ProcessOutputLine(string line)
 		{
-			foreach (var line in ppout)
+			if (line.StartsWith('#'))
 			{
-				if (line.StartsWith('#'))
+				//Console.WriteLine(line);
+
+				if (line.Length < 2)
+					return;
+				if (line[1] != ' ')
+					return;
+				var pathStart = line.IndexOf('"');
+				if (pathStart < 0)
 				{
-					//Console.WriteLine(line);
-
-					if (line.Length < 2)
-						continue;
-					if (line[1] != ' ')
-						continue;
-					var pathStart = line.IndexOf('"');
-					if (pathStart < 0)
-					{
-						Log.Warning("Cannot parse line info line: " + line);
-						continue;
-					}
-
-					var pathEnd = line.IndexOf('"', pathStart + 1);
-					if (pathEnd < 0)
-					{
-						Log.Warning("Cannot parse line info line: " + line);
-						continue;
-					}
-
-					var lineInfo = new LineInfo();
-					lineInfo.path = line.Substring(pathStart + 1, pathEnd - pathStart - 1);
-
-					var flags0 = line.Substring(pathEnd + 1);
-					var flags1 = flags0.Split(" ", StringSplitOptions.RemoveEmptyEntries);
-
-					foreach (var f in flags1)
-					{
-						switch (f)
-						{
-							case "1":
-								lineInfo.fileStart = true;
-								break;
-							case "2":
-								lineInfo.fileReturn = true;
-								break;
-							case "3":
-								lineInfo.systemHeader = true;
-								break;
-							case "4":
-								lineInfo.externCBlock = true;
-								break;
-						}
-					}
-
-					m_currentLine = line;
-					ProcessLineInfoLine(lineInfo);
+					Log.Warning("Cannot parse line info line: " + line);
+					return;
 				}
-				else
+
+				var pathEnd = line.IndexOf('"', pathStart + 1);
+				if (pathEnd < 0)
 				{
-					ProcessContentLine(line);
+					Log.Warning("Cannot parse line info line: " + line);
+					return;
 				}
+
+				var lineInfo = new LineInfo();
+				lineInfo.path = line.Substring(pathStart + 1, pathEnd - pathStart - 1);
+
+				var flags0 = line.Substring(pathEnd + 1);
+				var flags1 = flags0.Split(" ", StringSplitOptions.RemoveEmptyEntries);
+
+				foreach (var f in flags1)
+				{
+					switch (f)
+					{
+						case "1":
+							lineInfo.fileStart = true;
+							break;
+						case "2":
+							lineInfo.fileReturn = true;
+							break;
+						case "3":
+							lineInfo.systemHeader = true;
+							break;
+						case "4":
+							lineInfo.externCBlock = true;
+							break;
+					}
+				}
+
+				m_currentLine = line;
+				ProcessLineInfoLine(lineInfo);
 			}
-
-			m_currentLine = null;
-
-			if (m_includeStack.Count != 1)
-				throw new Exception("Missing return from include: EOF.");
-			Debug.Assert(m_includeStack[0] == m_mainFile);
-
-			LeaveFile(true);
+			else
+			{
+				ProcessContentLine(line);
+			}
 		}
 
 		private void ProcessLineInfoLine(LineInfo lineInfo)
@@ -323,6 +333,14 @@ namespace iscan
 			pa.Run(compileCommandsJson, outputPath);
 		}
 
+		private ParallelAnalyzer()
+		{
+			m_dataModel_tus = new List<DMTranslationUnit>();
+		}
+
+		private const int OUTPUT_WRITER_FLUSH_THRESHOLD = 100 * 1024 * 1024;
+		private const int THREAD_COUNT = 24;
+
 		private void Run(string compileCommandsJson, string outputPath)
 		{
 			var json = File.ReadAllText(compileCommandsJson);
@@ -337,29 +355,49 @@ namespace iscan
 			m_totalJobCount = m_jobList.Count;
 
 			var threads = new List<Thread>();
-			for (int i = 0; i < 24; i++)
+			for (int i = 0; i < THREAD_COUNT; i++)
 				threads.Add(new Thread(() => ThreadFunction()));
 			foreach (var t in threads)
 				t.Start();
 			foreach (var t in threads)
 				t.Join();
 
-			m_dataModel.paths = m_pathMap.GetStrings();
+			var dataModel_paths = m_pathMap.GetStrings();
 
 			using (var outputStream = File.Create(outputPath))
-			using (var outputWriter = new Utf8JsonWriter(outputStream, new JsonWriterOptions{ Indented = true, SkipValidation = true }))
+			using (var outputWriter = new Utf8JsonWriter(outputStream, new JsonWriterOptions{ Indented = true, SkipValidation = false }))
 			{
-				JsonSerializer.Serialize(outputWriter, m_dataModel, new JsonSerializerOptions{ WriteIndented = true });
+				var serializerOptions = new JsonSerializerOptions();
+
+				outputWriter.WriteStartObject();
+
+				outputWriter.WriteStartArray("paths");
+				foreach (var p in dataModel_paths)
+					outputWriter.WriteStringValue(p);
+				outputWriter.WriteEndArray();
 				outputWriter.Flush();
+
+				outputWriter.WriteStartArray("tus");
+				foreach (var tu in m_dataModel_tus)
+				{ 
+					JsonSerializer.Serialize(outputWriter, tu, serializerOptions);
+					if (outputWriter.BytesPending > OUTPUT_WRITER_FLUSH_THRESHOLD)
+						outputWriter.Flush();
+				}
+				outputWriter.WriteEndArray();
+
+				outputWriter.WriteEndObject();
+				outputWriter.Flush();
+
 				outputStream.Flush();
 			}
 		}
 
 		private void ThreadFunction()
 		{
+			var scratch = new SerializerScratch();
 			while (true)
 			{
-				int fileNum;
 				CompileCommandsJsonEntry file;
 
 				lock (m_jobListMutex)
@@ -368,7 +406,6 @@ namespace iscan
 						break;
 					file = m_jobList.First.Value;
 					m_jobList.RemoveFirst();
-					fileNum = m_totalJobCount - m_jobList.Count;
 				}
 
 				if (!File.Exists(file.file))
@@ -384,15 +421,25 @@ namespace iscan
 					continue;
 				}
 
-				Console.WriteLine("{0}/{1} '{2}'...", fileNum, m_totalJobCount, file.file);
+				lock (m_jobListMutex)
+				{
+					m_processedJobCount++;
+					Console.WriteLine("{0}/{1} '{2}'...", m_processedJobCount, m_totalJobCount, file.file);
+				}
 
-				var dmTu = ToDataModel(tuResult);
+				var dmTu = ToDataModel(tuResult, scratch);
 				lock (m_dataModelLock)
-					m_dataModel.tus.Add(dmTu);
+					m_dataModel_tus.Add(dmTu);
 			}
 		}
 
-		private DMTranslationUnit ToDataModel(FileEntry translationUnit)
+		class SerializerScratch
+		{
+			public readonly List<int> inc = new List<int>();
+			public readonly List<DMFile> files = new List<DMFile>();
+		}
+
+		private DMTranslationUnit ToDataModel(FileEntry translationUnit, SerializerScratch scratch)
 		{
 			Dictionary<FileEntry, bool> seen = new Dictionary<FileEntry, bool>();
 			LinkedList<FileEntry> toProcess = new LinkedList<FileEntry>();
@@ -403,6 +450,7 @@ namespace iscan
 			toProcess.AddLast(translationUnit);
 			seen[translationUnit] = true;
 
+			scratch.files.Clear();
 			while (toProcess.Count > 0)
 			{
 				var entry = toProcess.First.Value;
@@ -413,6 +461,7 @@ namespace iscan
 				dmFile.sln = entry.SelfLineCount;
 				dmFile.stk = entry.SelfTokenCount;
 
+				scratch.inc.Clear();
 				foreach (var includeNode in entry.Includes)
 				{
 					var include = includeNode.Key;
@@ -422,11 +471,17 @@ namespace iscan
 						seen[include] = true;
 					}
 
-					dmFile.inc.Add(MapPath(include.Path));
+					scratch.inc.Add(MapPath(include.Path));
 				}
 
-				dmTu.files.Add(dmFile);
+				dmFile.inc = scratch.inc.ToArray();
+				scratch.inc.Clear();
+
+				scratch.files.Add(dmFile);
 			}
+
+			dmTu.files = scratch.files.ToArray();
+			scratch.files.Clear();
 
 			return dmTu;
 		}
@@ -439,11 +494,12 @@ namespace iscan
 		private readonly object m_jobListMutex = new object();
 		private readonly LinkedList<CompileCommandsJsonEntry> m_jobList = new LinkedList<CompileCommandsJsonEntry>();
 		private int m_totalJobCount;
+		private int m_processedJobCount;
 
 		private readonly SynchronizedStringMap m_stringMap = new SynchronizedStringMap();
 		private readonly SynchronizedStringMap m_pathMap = new SynchronizedStringMap();
 
 		private readonly object m_dataModelLock = new object();
-		private DMProject m_dataModel = new DMProject();
+		private readonly List<DMTranslationUnit> m_dataModel_tus = new List<DMTranslationUnit>();
 	}
 }
