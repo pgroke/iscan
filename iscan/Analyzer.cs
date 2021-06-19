@@ -10,7 +10,7 @@ using iscan.dm;
 
 namespace iscan
 {
-	class Analyzer
+	internal class Analyzer
 	{
 		public static FileEntry AnalyzeCompileCommand(string compileCommand, SynchronizedStringMap stringMap)
 		{
@@ -34,7 +34,7 @@ namespace iscan
 
 			var stderr = new List<string>();
 
-			int exitCode = Utility.ExecuteCommand(commandLine,
+			var exitCode = Utility.ExecuteCommand(commandLine,
 				(line) => ProcessOutputLine(line),
 				(line) => stderr.Add(line));
 
@@ -56,7 +56,7 @@ namespace iscan
 			return true;
 		}
 
-		private string StripCommand(string command)
+		private static string StripCommand(string command)
 		{
 			var parts = CommandLine.Split(command);
 
@@ -66,7 +66,7 @@ namespace iscan
 			var sb = new StringBuilder();
 			sb.Append(parts[0]);
 
-			bool skipNext = false;
+			var skipNext = false;
 			foreach (var p in parts.Skip(1))
 			{
 				if (skipNext)
@@ -82,7 +82,7 @@ namespace iscan
 				if (p == "-c" || p == "\"-c\"")
 					continue;
 
-				sb.Append(" ");
+				sb.Append(' ');
 				sb.Append(p);
 			}
 
@@ -114,9 +114,9 @@ namespace iscan
 				}
 
 				var lineInfo = new LineInfo();
-				lineInfo.path = line.Substring(pathStart + 1, pathEnd - pathStart - 1);
+				lineInfo.path = line[(pathStart + 1)..(pathEnd - 1)];
 
-				var flags0 = line.Substring(pathEnd + 1);
+				var flags0 = line[(pathEnd + 1)..];
 				var flags1 = flags0.Split(" ", StringSplitOptions.RemoveEmptyEntries);
 
 				foreach (var f in flags1)
@@ -226,12 +226,12 @@ namespace iscan
 
 		private void CountContents()
 		{
-			int tokenCount = TokenCounter.CountTokens(m_currentContents);
+			var tokenCount = TokenCounter.CountTokens(m_currentContents);
 
 			int lineCount = 0;
 			foreach (var line in m_currentContents)
 			{
-				foreach (char ch in line)
+				foreach (var ch in line)
 				{
 					if (ch != ' ')
 					{
@@ -271,7 +271,7 @@ namespace iscan
 
 		private FileEntry CurrentFile()
 		{
-			return m_includeStack[m_includeStack.Count - 1];
+			return m_includeStack[^1];
 		}
 
 		private readonly SynchronizedStringMap m_stringMap;
@@ -282,13 +282,13 @@ namespace iscan
 		private bool m_startCommandLineWorkaroundDone = false;
 		private bool m_returnToMainWorkaroundDone = false;
 
-		private List<FileEntry> m_includeStack = new List<FileEntry>();
-		private List<string> m_currentContents = new List<string>();
+		private readonly List<FileEntry> m_includeStack = new();
+		private readonly List<string> m_currentContents = new();
 
-		private Dictionary<string, FileEntry> m_files = new Dictionary<string, FileEntry>();
+		private readonly Dictionary<string, FileEntry> m_files = new();
 	}
 
-	class FileEntry
+	internal class FileEntry
 	{
 		public FileEntry(string path, bool isTU)
 		{
@@ -310,7 +310,7 @@ namespace iscan
 		public int SelfLineCount = 0;
 	}
 
-	struct LineInfo
+	internal struct LineInfo
 	{
 		public string path;
 
@@ -325,7 +325,7 @@ namespace iscan
 		}
 	}
 
-	class ParallelAnalyzer
+	internal class ParallelAnalyzer
 	{
 		public static void ProcessCompileCommandsJson(string compileCommandsJson, string outputPath)
 		{
@@ -364,33 +364,31 @@ namespace iscan
 
 			var dataModel_paths = m_pathMap.GetStrings();
 
-			using (var outputStream = File.Create(outputPath))
-			using (var outputWriter = new Utf8JsonWriter(outputStream, new JsonWriterOptions{ Indented = true, SkipValidation = false }))
+			using var outputStream = File.Create(outputPath);
+			using var outputWriter = new Utf8JsonWriter(outputStream, new JsonWriterOptions { Indented = true, SkipValidation = false });
+			var serializerOptions = new JsonSerializerOptions();
+
+			outputWriter.WriteStartObject();
+
+			outputWriter.WriteStartArray("paths");
+			foreach (var p in dataModel_paths)
+				outputWriter.WriteStringValue(p);
+			outputWriter.WriteEndArray();
+			outputWriter.Flush();
+
+			outputWriter.WriteStartArray("tus");
+			foreach (var tu in m_dataModel_tus)
 			{
-				var serializerOptions = new JsonSerializerOptions();
-
-				outputWriter.WriteStartObject();
-
-				outputWriter.WriteStartArray("paths");
-				foreach (var p in dataModel_paths)
-					outputWriter.WriteStringValue(p);
-				outputWriter.WriteEndArray();
-				outputWriter.Flush();
-
-				outputWriter.WriteStartArray("tus");
-				foreach (var tu in m_dataModel_tus)
-				{ 
-					JsonSerializer.Serialize(outputWriter, tu, serializerOptions);
-					if (outputWriter.BytesPending > OUTPUT_WRITER_FLUSH_THRESHOLD)
-						outputWriter.Flush();
-				}
-				outputWriter.WriteEndArray();
-
-				outputWriter.WriteEndObject();
-				outputWriter.Flush();
-
-				outputStream.Flush();
+				JsonSerializer.Serialize(outputWriter, tu, serializerOptions);
+				if (outputWriter.BytesPending > OUTPUT_WRITER_FLUSH_THRESHOLD)
+					outputWriter.Flush();
 			}
+			outputWriter.WriteEndArray();
+
+			outputWriter.WriteEndObject();
+			outputWriter.Flush();
+
+			outputStream.Flush();
 		}
 
 		private void ThreadFunction()
@@ -433,18 +431,18 @@ namespace iscan
 			}
 		}
 
-		class SerializerScratch
+		private class SerializerScratch
 		{
-			public readonly List<int> inc = new List<int>();
-			public readonly List<DMFile> files = new List<DMFile>();
+			public readonly List<int> inc = new();
+			public readonly List<DMFile> files = new();
 		}
 
 		private DMTranslationUnit ToDataModel(FileEntry translationUnit, SerializerScratch scratch)
 		{
-			Dictionary<FileEntry, bool> seen = new Dictionary<FileEntry, bool>();
-			LinkedList<FileEntry> toProcess = new LinkedList<FileEntry>();
+			var seen = new Dictionary<FileEntry, bool>();
+			var toProcess = new LinkedList<FileEntry>();
 
-			DMTranslationUnit dmTu = new DMTranslationUnit();
+			var dmTu = new DMTranslationUnit();
 			dmTu.path = MapPath(translationUnit.Path);
 
 			toProcess.AddLast(translationUnit);
@@ -491,15 +489,15 @@ namespace iscan
 			return m_pathMap.Add(path);
 		}
 
-		private readonly object m_jobListMutex = new object();
-		private readonly LinkedList<CompileCommandsJsonEntry> m_jobList = new LinkedList<CompileCommandsJsonEntry>();
+		private readonly object m_jobListMutex = new();
+		private readonly LinkedList<CompileCommandsJsonEntry> m_jobList = new();
 		private int m_totalJobCount;
 		private int m_processedJobCount;
 
-		private readonly SynchronizedStringMap m_stringMap = new SynchronizedStringMap();
-		private readonly SynchronizedStringMap m_pathMap = new SynchronizedStringMap();
+		private readonly SynchronizedStringMap m_stringMap = new();
+		private readonly SynchronizedStringMap m_pathMap = new();
 
-		private readonly object m_dataModelLock = new object();
-		private readonly List<DMTranslationUnit> m_dataModel_tus = new List<DMTranslationUnit>();
+		private readonly object m_dataModelLock = new();
+		private readonly List<DMTranslationUnit> m_dataModel_tus = new();
 	}
 }

@@ -4,7 +4,7 @@ using System.Text;
 
 namespace iscan
 {
-	static class TokenCounter
+	static internal class TokenCounter
 	{
 		public static int CountTokens(List<string> lines)
 		{
@@ -49,7 +49,7 @@ namespace iscan
 			return tokenCount;
 		}
 
-		enum CharType
+		private enum CharType
 		{
 			Whitespace,
 			SymbolChar,
@@ -68,7 +68,7 @@ namespace iscan
 
 		private static CharType Classify(char ch)
 		{
-			int chi = (int)ch;
+			var chi = (int)ch;
 			if (chi < 0 || chi > 255)
 				return CharType.SymbolChar; // Doesn't really matter
 
@@ -77,16 +77,16 @@ namespace iscan
 
 		private static void TagCharRange(CharType type, char begin, char end)
 		{
-			for (char ch = begin; ch <= end; ch++)
+			for (var ch = begin; ch <= end; ch++)
 				s_charMap[ch] = type;
 		}
 
 		private static void TagChars(CharType type, params char[] chs)
 		{
-			foreach (char ch in chs)
+			foreach (var ch in chs)
 				s_charMap[ch] = type;
 		}
 
-		private static CharType[] s_charMap = new CharType[256];
+		private static readonly CharType[] s_charMap = new CharType[256];
 	}
 }

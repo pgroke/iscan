@@ -4,7 +4,7 @@ using System.Text;
 
 namespace iscan
 {
-	class StringMap
+	internal class StringMap
 	{
 		public string[] GetStrings()
 		{
@@ -27,7 +27,7 @@ namespace iscan
 				return m_index[str];
 
 			m_strings.Add(str);
-			int id = m_strings.Count - 1;
+			var id = m_strings.Count - 1;
 			m_index[str] = id;
 			return id;
 		}
@@ -37,11 +37,11 @@ namespace iscan
 			return Map(Add(str));
 		}
 
-		private readonly List<string> m_strings = new List<string>();
-		private readonly Dictionary<string, int> m_index = new Dictionary<string, int>();
+		private readonly List<string> m_strings = new();
+		private readonly Dictionary<string, int> m_index = new();
 	}
 
-	class SynchronizedStringMap
+	internal class SynchronizedStringMap
 	{
 		public string[] GetStrings()
 		{
@@ -73,7 +73,7 @@ namespace iscan
 				return m_stringMap.Intern(str);
 		}
 
-		private readonly object m_stringMapLock = new object();
-		private readonly StringMap m_stringMap = new StringMap();
+		private readonly object m_stringMapLock = new();
+		private readonly StringMap m_stringMap = new();
 	}
 }

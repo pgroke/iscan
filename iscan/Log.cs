@@ -4,7 +4,7 @@ using System.Text;
 
 namespace iscan
 {
-	static class Log
+	static internal class Log
 	{
 		public static void Info(string s)
 		{

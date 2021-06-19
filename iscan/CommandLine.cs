@@ -4,12 +4,12 @@ using System.Text;
 
 namespace iscan
 {
-    static class CommandLine
+	static internal class CommandLine
     {
         public static List<string> Split(string commandLine)
         {
-            bool escaped = false;
-            bool quoted = false;
+            var escaped = false;
+            var quoted = false;
             var sb = new StringBuilder();
             var args = new List<string>();
 

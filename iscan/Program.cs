@@ -5,9 +5,9 @@ using System.Text;
 
 namespace iscan
 {
-	class Program
+	internal class Program
 	{
-		static int Main(string[] args)
+		private static int Main(string[] args)
 		{
 			var sw = Stopwatch.StartNew();
 			try
