@@ -5,9 +5,14 @@ VisualStudioVersion = 16.0.31205.134
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "iscan", "iscan\iscan.csproj", "{627FDEEF-3289-4782-8FEA-6E8EDCCB288E}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "iscan.dm", "iscan.dm\iscan.dm.csproj", "{8FE5596D-C884-4846-B75B-C751D9AB84CA}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "iscan.dm", "iscan.dm\iscan.dm.csproj", "{8FE5596D-C884-4846-B75B-C751D9AB84CA}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "iscan.analyze", "iscan.analyze\iscan.analyze.csproj", "{F4441DF4-DAD1-4B0E-92D8-05407432519D}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "iscan.analyze", "iscan.analyze\iscan.analyze.csproj", "{F4441DF4-DAD1-4B0E-92D8-05407432519D}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{2C905DA1-3E81-4394-AA65-85BEF56CC102}"
+	ProjectSection(SolutionItems) = preProject
+		.editorconfig = .editorconfig
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
